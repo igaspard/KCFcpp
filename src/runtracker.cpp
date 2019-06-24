@@ -3,8 +3,7 @@
 #include <sstream>
 #include <algorithm>
 
-#include <opencv2/core/core.hpp>
-#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/opencv.hpp>
 
 #include "kcftracker.hpp"
 
@@ -13,6 +12,29 @@
 using namespace std;
 using namespace cv;
 
+bool init_success = false;
+void Callback(int event, int x, int y, int flags, void* userdata) {
+    static int count = 0;
+    if(count == 2) {
+        if(!init_success)
+            init_success = true;
+        return;
+    }
+
+    if(event == EVENT_LBUTTONDOWN) {
+        Rect& data = *(Rect*)(userdata);
+        if(count == 0) {
+            data.x = x;
+            data.y = y;
+        }
+        else if(count == 1) {
+            data.width = x - data.x;
+            data.height = y - data.y;
+        }
+        ++count;
+    }
+}
+
 int main(int argc, char* argv[]){
 
 	if (argc > 5) return -1;
@@ -20,7 +42,6 @@ int main(int argc, char* argv[]){
 	bool HOG = true;
 	bool FIXEDWINDOW = false;
 	bool MULTISCALE = true;
-	bool SILENT = true;
 	bool LAB = false;
 
 	for(int i = 0; i < argc; i++){
@@ -30,8 +51,6 @@ int main(int argc, char* argv[]){
 			FIXEDWINDOW = true;
 		if ( strcmp (argv[i], "singlescale") == 0 )
 			MULTISCALE = false;
-		if ( strcmp (argv[i], "show") == 0 )
-			SILENT = false;
 		if ( strcmp (argv[i], "lab") == 0 ){
 			LAB = true;
 			HOG = true;
@@ -49,91 +68,52 @@ int main(int argc, char* argv[]){
 	// Tracker results
 	Rect result;
 
-	// Path to list.txt
-	ifstream listFile;
-	string fileName = "images.txt";
-  	listFile.open(fileName);
-
-  	// Read groundtruth for the 1st frame
-  	ifstream groundtruthFile;
-	string groundtruth = "region.txt";
-  	groundtruthFile.open(groundtruth);
-  	string firstLine;
-  	getline(groundtruthFile, firstLine);
-	groundtruthFile.close();
-  	
-  	istringstream ss(firstLine);
-
-  	// Read groundtruth like a dumb
-  	float x1, y1, x2, y2, x3, y3, x4, y4;
-  	char ch;
-	ss >> x1;
-	ss >> ch;
-	ss >> y1;
-	ss >> ch;
-	ss >> x2;
-	ss >> ch;
-	ss >> y2;
-	ss >> ch;
-	ss >> x3;
-	ss >> ch;
-	ss >> y3;
-	ss >> ch;
-	ss >> x4;
-	ss >> ch;
-	ss >> y4; 
-
-	// Using min and max of X and Y for groundtruth rectangle
-	float xMin =  min(x1, min(x2, min(x3, x4)));
-	float yMin =  min(y1, min(y2, min(y3, y4)));
-	float width = max(x1, max(x2, max(x3, x4))) - xMin;
-	float height = max(y1, max(y2, max(y3, y4))) - yMin;
-
-	
-	// Read Images
-	ifstream listFramesFile;
-	string listFrames = "images.txt";
-	listFramesFile.open(listFrames);
-	string frameName;
-
-
-	// Write Results
-	ofstream resultsFile;
-	string resultsPath = "output.txt";
-	resultsFile.open(resultsPath);
-
 	// Frame counter
 	int nFrames = 0;
 
+    VideoCapture cap(0);
+    if(!cap.isOpened())
+        return -1;
 
-	while ( getline(listFramesFile, frameName) ){
-		frameName = frameName;
+    namedWindow("Image");
+    Rect init_rect;
+    setMouseCallback("Image", Callback, &init_rect);
 
-		// Read each frame from the list
-		frame = imread(frameName, CV_LOAD_IMAGE_COLOR);
+    while (1){
+        cap >> frame;
 
-		// First frame, give the groundtruth to the tracker
-		if (nFrames == 0) {
-			tracker.init( Rect(xMin, yMin, width, height), frame );
-			rectangle( frame, Point( xMin, yMin ), Point( xMin+width, yMin+height), Scalar( 0, 255, 255 ), 1, 8 );
-			resultsFile << xMin << "," << yMin << "," << width << "," << height << endl;
-		}
-		// Update
-		else{
-			result = tracker.update(frame);
-			rectangle( frame, Point( result.x, result.y ), Point( result.x+result.width, result.y+result.height), Scalar( 0, 255, 255 ), 1, 8 );
-			resultsFile << result.x << "," << result.y << "," << result.width << "," << result.height << endl;
-		}
+        if(init_success) {
+            tracker.init(init_rect,frame);
+            rectangle(frame, init_rect, Scalar( 0, 255, 255 ), 1, 8 );
+            ++nFrames;
+            init_success = false;
+        }
+        else if(nFrames > 0){
+            result = tracker.update(frame);
+            rectangle( frame, Point( result.x, result.y ), Point( result.x+result.width, result.y+result.height), Scalar( 0, 255, 255 ), 1, 8 );
+        }
 
-		nFrames++;
+//		// Read each frame from the list
+//		frame = imread(frameName, CV_LOAD_IMAGE_COLOR);
 
-		if (!SILENT){
-			imshow("Image", frame);
-			waitKey(1);
-		}
+//		// First frame, give the groundtruth to the tracker
+//		if (nFrames == 0) {
+//			tracker.init( Rect(xMin, yMin, width, height), frame );
+//			rectangle( frame, Point( xMin, yMin ), Point( xMin+width, yMin+height), Scalar( 0, 255, 255 ), 1, 8 );
+//			resultsFile << xMin << "," << yMin << "," << width << "," << height << endl;
+//		}
+//		// Update
+//		else{
+//			result = tracker.update(frame);
+//			rectangle( frame, Point( result.x, result.y ), Point( result.x+result.width, result.y+result.height), Scalar( 0, 255, 255 ), 1, 8 );
+//			resultsFile << result.x << "," << result.y << "," << result.width << "," << result.height << endl;
+//		}
+
+//		nFrames++;
+
+        imshow("Image", frame);
+        waitKey(1);
 	}
-	resultsFile.close();
 
-	listFile.close();
-
+    return 0;
 }
